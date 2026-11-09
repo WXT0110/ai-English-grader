@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>高中英语 AI 批改助手</title>
+  <!-- Tailwind CSS（含 typography 插件，用于美化 Markdown 渲染结果） -->
+  <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+  <!-- marked.js：用于将 API 返回的 Markdown 渲染为 HTML -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+    textarea {
+      resize: vertical;
+    }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen text-gray-800">
+
+  <main class="max-w-3xl mx-auto px-4 py-8 sm:py-12">
+
+    <!-- 顶部标题 -->
+    <header class="text-center">
+      <h1 class="text-2xl sm:text-3xl font-bold text-blue-900 tracking-wide">📝 高中英语 AI 批改助手</h1>
+      <p class="mt-2 text-sm text-gray-500">填写题目与前文，粘贴作文，获取特级教师级别的批改与提分建议</p>
+    </header>
+
+    <!-- 控制区：题型选择 -->
+    <section class="mt-8 bg-white rounded-2xl border border-gray-200 shadow-sm p-5 sm:p-6">
+      <label for="essayType" class="block text-sm font-semibold text-gray-700 mb-2">选择题型</label>
+      <select id="essayType"
+        class="w-full rounded-xl border border-gray-300 bg-gray-50 px-4 py-3 text-gray-800 text-base
+               focus:outline-none focus:ring-2 focus:ring-blue-900 focus:border-blue-900">
+        <option value="15">应用文/小作文 (15分)</option>
+        <option value="25">读后续写 (25分)</option>
+      </select>
+      <p id="typeHint" class="mt-2 text-xs text-gray-400">小作文重点评估：格式、要点齐全、语言得体</p>
+    </section>
+
+    <!-- 题目/前文材料区（新增） -->
+    <section class="mt-4 bg-white rounded-2xl border border-gray-200 shadow-sm p-5 sm:p-6">
+      <label for="promptInput" class="block text-sm font-semibold text-gray-700 mb-2">作文题目 / 续写前文材料</label>
+      <textarea id="promptInput" rows="5" placeholder="请粘贴作文题目要求或续写的前文材料（如果没有可留空）..."
+        class="w-full rounded-xl border border-gray-300 bg-gray-50 px-4 py-3 text-gray-800 leading-relaxed
+               focus:outline-none focus:ring-2 focus:ring-blue-900 focus:border-blue-900"></textarea>
+      <p class="mt-2 text-xs text-gray-400">提供题目/前文后，AI 才能评判是否切题、衔接是否合理（可留空）</p>
+    </section>
+
+    <!-- 学生作文区 -->
+    <section class="mt-4 bg-white rounded-2xl border border-gray-200 shadow-sm p-5 sm:p-6">
+      <label for="essayInput" class="block text-sm font-semibold text-gray-700 mb-2">学生作文</label>
+      <textarea id="essayInput" rows="12" placeholder="请粘贴需要批改的英语作文..."
+        class="w-full rounded-xl border border-gray-300 bg-gray-50 px-4 py-3 text-gray-800 leading-relaxed
+               focus:outline-none focus:ring-2 focus:ring-blue-900 focus:border-blue-900"></textarea>
+
+      <div class="mt-3 flex items-center justify-between gap-3">
+        <span id="charCount" class="text-xs text-gray-400">0 词</span>
+        <button id="correctBtn" type="button"
+          class="shrink-0 inline-flex items-center justify-center gap-2 rounded-xl bg-blue-900 px-6 py-3
+                 text-white font-medium shadow-sm hover:bg-blue-800 disabled:opacity-60 disabled:cursor-not-allowed">
+          一键批改
+        </button>
+      </div>
+      <p id="emptyHint" class="hidden mt-2 text-xs text-red-500">请先粘贴需要批改的英语作文再点击批改</p>
+    </section>
+
+    <!-- 结果展示区（初始隐藏） -->
+    <section id="resultSection" class="hidden mt-6">
+      <div class="bg-white rounded-2xl border border-blue-100 shadow-lg p-5 sm:p-8">
+        <div class="flex items-center justify-between border-b border-gray-100 pb-3 mb-4">
+          <h2 class="text-lg font-bold text-blue-900">批改结果</h2>
+          <span id="resultBadge" class="text-xs font-medium text-blue-900 bg-blue-50 border border-blue-100 rounded-full px-3 py-1"></span>
+        </div>
+        <div id="resultContent" class="prose prose-blue max-w-none prose-headings:text-blue-900 prose-strong:text-blue-900"></div>
+      </div>
+    </section>
+
+    <footer class="mt-10 text-center text-xs text-gray-400">
+      批改结果由 AI 生成，仅供参考学习使用
+    </footer>
+  </main>
+
+  <script>
+    /* ================= 配置区 ================= */
+    const API_KEY = 'sk-2a8577040eda42cc9b08c9826bfc629c';
+    const API_URL = 'https://api.deepseek.com/chat/completions';
+    const MODEL   = 'deepseek-chat';
+
+    /* ================= DOM 引用 ================= */
+    const essayTypeSelect = document.getElementById('essayType');
+    const typeHint        = document.getElementById('typeHint');
+    const promptInput     = document.getElementById('promptInput');
+    const essayInput      = document.getElementById('essayInput');
+    const charCount       = document.getElementById('charCount');
+    const correctBtn      = document.getElementById('correctBtn');
+    const emptyHint       = document.getElementById('emptyHint');
+    const resultSection   = document.getElementById('resultSection');
+    const resultBadge     = document.getElementById('resultBadge');
+    const resultContent   = document.getElementById('resultContent');
+
+    /* marked 渲染配置：GFM + 软换行转 <br> */
+    marked.setOptions({ gfm: true, breaks: true });
+
+    /* ================= 交互逻辑 ================= */
+
+    // 学生作文实时词数统计
+    essayInput.addEventListener('input', () => {
+      const text = essayInput.value.trim();
+      charCount.textContent = text ? text.split(/\s+/).length + ' 词' : '0 词';
+      emptyHint.classList.add('hidden');
+    });
+
+    // 切换题型时更新提示文案
+    essayTypeSelect.addEventListener('change', () => {
+      typeHint.textContent = essayTypeSelect.value === '15'
+        ? '小作文重点评估：格式、要点齐全、语言得体'
+        : '读后续写重点评估：与前文的逻辑衔接、情节走向、高级词汇与非谓语动词、环境/心理描写';
+    });
+
+    /**
+     * 拼接系统提示词（System Prompt）
+     * @param {string} scoreType - 下拉框 value：'15' 或 '25'
+     * @param {string} promptText - 题目/前文材料（可为空）
+     * @param {string} essay - 学生作文
+     */
+    function buildSystemPrompt(scoreType, promptText, essay) {
+      const topic = scoreType === '15' ? '小作文' : '读后续写';
+      const material = promptText.trim() ? promptText.trim() : '（未提供题目/前文材料，请自行根据学生作文内容判断）';
+      return `你现在是一位拥有20年教龄的中国高中英语特级教师。当前批改的题型是【${topic}】。
+> 如果题型是小作文（满分15分），请重点评估：格式是否正确、要点是否齐全、语言是否得体。
+> 如果题型是续写（满分25分），请重点评估：与所给前文的逻辑衔接、情节走向、高级词汇与非谓语动词的使用、环境/心理细节描写。
+【题目/前文材料】如下：
+> ${material}
+【学生作文】如下：
+> ${essay}
+请严格按以下结构输出：1.预估分数（基于对应满分）与总评（是否切题）；2.逐句纠错（指出语法/拼写错误并解释）；3.词汇与句型升级（提供高级替换）；4.针对该题型的提分建议。请使用 Markdown 格式排版。`;
+    }
+
+    /** 渲染错误信息到结果区 */
+    function renderError(message) {
+      resultSection.classList.remove('hidden');
+      resultBadge.textContent = '批改失败';
+      resultContent.innerHTML = `
+        <div class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 not-prose">
+          <p class="font-semibold">批改失败</p>
+          <p class="mt-1">${message}</p>
+          <p class="mt-2 text-xs text-red-500">常见原因：API_KEY 未填写或无效、网络不通、请求被限流。
+          若浏览器控制台提示 CORS 跨域错误，需通过后端代理转发请求。</p>
+        </div>`;
+    }
+
+    /** 主流程：点击“一键批改” */
+    async function correctEssay() {
+      const essay      = essayInput.value.trim();
+      const promptText = promptInput.value;
+
+      // 学生作文为必填
+      if (!essay) {
+        emptyHint.classList.remove('hidden');
+        essayInput.focus();
+        return;
+      }
+
+      const scoreType = essayTypeSelect.value; // '15' | '25'
+      const topic     = scoreType === '15' ? '应用文/小作文 (15分)' : '读后续写 (25分)';
+
+      // 按钮进入“批改中...”禁用状态
+      correctBtn.disabled = true;
+      correctBtn.textContent = '批改中...';
+
+      try {
+        const response = await fetch(API_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${API_KEY}`
+          },
+          body: JSON.stringify({
+            model: MODEL,
+            messages: [
+              { role: 'system', content: buildSystemPrompt(scoreType, promptText, essay) },
+              { role: 'user',   content: '请开始批改。' }
+            ],
+            temperature: 0.3,
+            max_tokens: 4096,
+            stream: false
+          })
+        });
+
+        if (!response.ok) {
+          let errMsg = `HTTP ${response.status}`;
+          try {
+            const errData = await response.json();
+            if (errData.error && errData.error.message) errMsg = errData.error.message;
+          } catch (e) { /* 保留默认错误信息 */ }
+          throw new Error(errMsg);
+        }
+
+        const data = await response.json();
+        const content = data.choices && data.choices[0] && data.choices[0].message
+          ? data.choices[0].message.content
+          : '';
+
+        if (!content) throw new Error('API 返回内容为空，请稍后重试。');
+
+        // 渲染结果
+        resultBadge.textContent = topic;
+        resultContent.innerHTML = marked.parse(content);
+        resultSection.classList.remove('hidden');
+        resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      } catch (err) {
+        console.error(err);
+        // TypeError 通常为网络错误或 CORS 拦截
+        const msg = err instanceof TypeError
+          ? '网络请求失败（可能是网络不通或被浏览器 CORS 策略拦截）'
+          : err.message;
+        renderError(msg);
+      } finally {
+        // 恢复按钮
+        correctBtn.disabled = false;
+        correctBtn.textContent = '一键批改';
+      }
+    }
+
+    correctBtn.addEventListener('click', correctEssay);
+  </script>
+</body>
+</html>
